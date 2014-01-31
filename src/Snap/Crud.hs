@@ -5,6 +5,7 @@ import           Snap
 import           Control.Lens
 import           Control.Monad.Cont
 import           Control.Monad.Trans.Class
+import           Control.Monad.Writer hiding (Product, pass)
 import           Data.Monoid hiding (Product)
 import           Data.Functor.Identity
 import           Data.Functor.Product
@@ -16,39 +17,6 @@ import           Heist
 import           Heist.Compiled
 import qualified Database.Groundhog as GH
 
--- This looks an awful lot like a lens.:..
--- What we're trying to do is create a database-aware lens for a
--- datatype...
---
---
-
--- We use a Writer applicative to build our routing tree
--- The intention is that m should be an instance of MonadSnap, with
--- the monoid Writer requires provided by snap's Alternative instance.
---type Crud m a = Product (ContT () m a) Identity
-
--- First complication: We need to know that our final datatype is
--- an instance of PersistEntity. But we only have available the 
--- for said datatype. How can we use that to ensure the suitability of
--- the final type, especially given that we don't know how many arguments
--- we might get?
---
--- Maybe we need a typeclass for eventually-persitable continuations?
---
--- For now, make Snap return the persisted type.
-
-
---resource :: forall m v. (PersistEntity v, MonadSnap m, PersistBackend m)
-         -- => Bytestring -> (b -> a) -> Crud (m v) (b -> a)
---resource name constructor = Product (Constant handlers) (pure constructor)
-  --where
---    handlers = create <|> retrieve <|> update <|> destroy <|> list
-   
---    create :: v -> m ()
-  --  create v = path byteString . method POST $ insert_ v
-
-  --  retrieve :: m ()
---    g
 
 -- Parse one field and bind one splice. We'll also need:
 --     - to render a list of items
@@ -56,7 +24,7 @@ import qualified Database.Groundhog as GH
 --       for the parsing side).
 --     - update a field in a record.
 --     - delete a record.
-type Field r a = Product (Recieve) (Render r) a
+type CRUD r a = Product (Recieve) (Render r) a
 
 field :: (Read a, Show a) => ByteString -> Lens' r a -> a -> Field r a
 field name l v = Pair recieve render
@@ -91,7 +59,7 @@ type Recieve = Snap
 --type Render r = ContT r (WriterT (Splices (Splice Snap))  Snap)
 type Render r = Writer (r -> Splices (Splice Snap))
 
-type Writer mo = Product (Const mo) Identity
+--type Writer mo = Product (Const mo) Identity
 
-tell :: Monoid mo => mo -> Writer mo ()
-tell mo = Pair (Const mo) (pure ())
+--tell :: Monoid mo => mo -> Writer mo ()
+--tell mo = Pair (Const mo) (pure ())
