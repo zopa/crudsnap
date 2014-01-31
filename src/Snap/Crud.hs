@@ -3,6 +3,7 @@
 module Snap.Crud where
 
 import           Snap
+import           Snap.Util.Readable
 import           Control.Lens
 import           Control.Monad.Cont
 import           Control.Monad.Trans.Class
@@ -14,10 +15,10 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import qualified Database.Groundhog as GH
+import qualified Database.Groundhog.Core as GH
 import           Heist
 import           Heist.Compiled
-import qualified Database.Groundhog as GH
-
 
 -- Parse one field and bind one splice. We'll also need:
 --     - to render a list of items
@@ -26,29 +27,43 @@ import qualified Database.Groundhog as GH
 --     - update a field in a record.
 --     - delete a record.
 
-type Crud r a = Product (Recieve) (Render r) a
+-- The idea is to use this like formlets/digestive-functors:
+--     Constructor <$> field name1 lens1 <*> field name2 lens2, etc.
+-- Then `handle`, below, should turn a Crud m r r into a MonadSnap m,
+-- which knows about all the relevant paths, methods, and splices.
 
-field :: (Read a, Show a) => ByteString -> Lens' r a -> Crud r a
-field name l = Pair recieve render
+type Crud m r a = Product m (Retrieve m r) a
+
+field :: (Readable a, Show a, MonadSnap m) => ByteString -> Lens' r a
+      -> Crud m r a
+field name l = Pair create retrieve
   where
-    -- We really want a user-supplied parser, and error-handling
-    -- for the no-such-parameter case
-    recieve = getParam name >>= maybe pass (return . read . B.unpack)
+    -- We probably want error-handling for the no-such-parameter case
+    create = getParam name >>= fromBS
    
     --splice :: Snap r -> Splice Snap
-    splice m = return . yieldRuntime $
-           lift m >>= return . textSplice (T.pack . show) . view l
-    render = do
+    splice m = return . yieldRuntime $ lift m >>=
+        return . textSplice (T.pack . show) . view l
+    retrieve = do
        m   <- lift get
        tell $ (T.decodeUtf8 name ## splice m)
        rec <- lift . lift $ m
        lift . put $ return rec
        return $ view l rec
 
-type Recieve = Snap 
-
-type Render r = WriterT (Splices (Splice Snap)) (StateT (Snap r) Snap)
+type Retrieve m r = WriterT (Splices (Splice m)) (StateT (m r) m)
     
+handle :: (GH.PersistEntity r, GH.PersistBackend m, MonadSnap m) => 
+          Crud m r r -> (ByteString -> m r) -> m ()
+handle (Pair c r) byKey = route create <|> retrieve
+  where
+    create   = method POST $ c >>= GH.insert_
 
-    -- If we're rendering (a single record, not a list),
-    -- the last segment of the path represents the record id
+    -- This should come after the to-be implemented list-all handler,
+    -- so that that handler can use `ifTop`.
+    -- An alternative might be to use `pathArg`, which does almost
+    -- the right thing.
+    retrieve = method GET $ do
+        let access = withRequest (byKey . rqPathInfo)
+        ((spl, rec), _) <- (runStateT . runWriterT) r access
+        undefined
