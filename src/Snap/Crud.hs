@@ -34,12 +34,12 @@ import           Heist.Compiled
 
 type Crud m r a = Product m (Retrieve m r) a
 
-field :: (Readable a, Show a, MonadSnap m) => ByteString -> Lens' r a
-      -> Crud m r a
+field :: (Readable a, Show a, MonadSnap m) =>
+         ByteString -> Lens' r a -> Crud m r a
 field name l = Pair create retrieve
   where
     -- We probably want error-handling for the no-such-parameter case
-    create = getParam name >>= fromBS
+    create = getParam name >>= maybe pass fromBS
    
     --splice :: Snap r -> Splice Snap
     splice m = return . yieldRuntime $ lift m >>=
@@ -55,7 +55,7 @@ type Retrieve m r = WriterT (Splices (Splice m)) (StateT (m r) m)
     
 handle :: (GH.PersistEntity r, GH.PersistBackend m, MonadSnap m) => 
           Crud m r r -> (ByteString -> m r) -> m ()
-handle (Pair c r) byKey = route create <|> retrieve
+handle (Pair c r) byKey = create <|> retrieve
   where
     create   = method POST $ c >>= GH.insert_
 
